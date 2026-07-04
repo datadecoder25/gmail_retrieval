@@ -8,8 +8,17 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+import csv
+import html
+import re
+from email.utils import parseaddr
+
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+def extract_email(address):
+    if not address:
+        return ""
+    return parseaddr(address)[1].lower()
 
 def get_service():
     creds = None
@@ -35,6 +44,34 @@ def decode_b64url(data: str) -> str:
         return ""
     padded = data + "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
+
+
+def html_to_text(html_body: str) -> str:
+    if not html_body:
+        return ""
+    text = re.sub(r"(?is)<script.*?>.*?</script>", "", html_body)
+    text = re.sub(r"(?is)<style.*?>.*?</style>", "", text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)</p>|</div>|</li>", "\n", text)
+    text = re.sub(r"(?is)<li>", "- ", text)
+    text = re.sub(r"(?is)<[^>]+>", "", text)
+    text = html.unescape(text)
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\n{2,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.replace("\r", "\n")
+    text = text.strip()
+    lines = [line.strip() for line in text.splitlines()]
+    lines = [line for line in lines if line]
+    normalized = " ".join(lines)
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    return normalized.strip()
 
 
 def headers_to_dict(headers):
@@ -152,6 +189,46 @@ def export_threads(service, thread_ids):
 
     return exported
 
+def export_csv(exported_threads, output_csv):
+    print("export_csv called")
+    with open(output_csv, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+
+        writer.writerow([
+            "thread_id",
+            "subject",
+            "senders",
+            "message_count",
+            "thread"
+        ])
+
+        for thread in exported_threads:
+
+            messages = sorted(
+                thread["messages"],
+                key=lambda x: int(x["internalDate"])
+            )
+
+            sender_set = set()
+            conversation = []
+
+            for msg in messages:
+                sender = extract_email(msg["from"])
+                if sender:
+                    sender_set.add(sender)
+
+                raw_body = msg["plainBody"] or html_to_text(msg["htmlBody"])
+                body = normalize_text(raw_body)
+                if body:
+                    conversation.append(body)
+
+            writer.writerow([
+                thread["threadId"],
+                normalize_text(messages[0]["subject"]) if messages else "",
+                "; ".join(sorted(sender_set)),
+                len(messages),
+                " \n ".join(conversation)
+            ])
 
 def main():
     parser = argparse.ArgumentParser()
@@ -161,6 +238,11 @@ def main():
         help='Optional full Gmail query. Overrides --email. Example: from:"person@example.com"',
     )
     parser.add_argument("--output", default="gmail_threads.json")
+    parser.add_argument(
+        "--csv-output",
+        default="output.csv",
+        help="CSV output path. Defaults to the JSON output filename with .csv extension.",
+    )
     parser.add_argument("--include-spam-trash", action="store_true")
     args = parser.parse_args()
 
@@ -179,11 +261,14 @@ def main():
     print(f"Found {len(thread_ids)} matching thread(s).")
 
     data = export_threads(service, thread_ids)
+    csv_output = Path(args.csv_output) if args.csv_output else Path(args.output).with_suffix(".csv")
+    export_csv(data, csv_output)
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    print(f"Saved to {args.output}")
+    print(f"Saved JSON to {args.output}")
+    print(f"Saved CSV to {csv_output}")
 
 
 if __name__ == "__main__":
