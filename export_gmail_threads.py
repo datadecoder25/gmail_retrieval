@@ -3,10 +3,16 @@ import base64
 import json
 from pathlib import Path
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+try:
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+except ImportError:  # pragma: no cover - optional for tests
+    Request = None
+    Credentials = None
+    InstalledAppFlow = None
+    build = None
 
 import csv
 import html
@@ -20,7 +26,41 @@ def extract_email(address):
         return ""
     return parseaddr(address)[1].lower()
 
+def normalize_target(target: str) -> str:
+    if not target:
+        return ""
+
+    normalized = target.strip().lower()
+    if " " in normalized:
+        return normalized
+
+    if normalized.startswith("@"):
+        return normalized
+
+    if normalized.count("@") == 1:
+        return normalized
+
+    if "." in normalized:
+        return f"@{normalized}"
+
+    return normalized
+
+
+def build_search_query(target: str) -> str:
+    normalized = normalize_target(target)
+    if not normalized:
+        raise ValueError("Target cannot be empty")
+
+    return (
+        f'{{from:"{normalized}" to:"{normalized}" '
+        f'cc:"{normalized}" bcc:"{normalized}"}}'
+    )
+
+
 def get_service():
+    if not Credentials or not InstalledAppFlow or not build:
+        raise RuntimeError("Google API dependencies are not installed")
+
     creds = None
     if Path("token.json").exists():
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
@@ -232,10 +272,17 @@ def export_csv(exported_threads, output_csv):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--email", required=True, help="Target email address")
+    parser.add_argument(
+        "--email",
+        help="Target email address or domain, e.g. person@example.com or @xyz.com",
+    )
+    parser.add_argument(
+        "--domain",
+        help="Domain to match, e.g. @xyz.com or xyz.com",
+    )
     parser.add_argument(
         "--query",
-        help='Optional full Gmail query. Overrides --email. Example: from:"person@example.com"',
+        help='Optional full Gmail query. Overrides the default search built from --email/--domain. Example: from:"person@example.com"',
     )
     parser.add_argument("--output", default="gmail_threads.json")
     parser.add_argument(
@@ -246,11 +293,11 @@ def main():
     parser.add_argument("--include-spam-trash", action="store_true")
     args = parser.parse_args()
 
-    # Default: any thread where this address appears in from/to/cc/bcc
-    query = args.query or (
-        f'{{from:"{args.email}" to:"{args.email}" '
-        f'cc:"{args.email}" bcc:"{args.email}"}}'
-    )
+    target = args.domain or args.email
+    if not target:
+        parser.error("Provide either --email or --domain")
+
+    query = args.query or build_search_query(target)
 
     print("Using query:", query)
 

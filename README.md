@@ -1,13 +1,13 @@
 # Gmail Thread Exporter
 
-This project provides an automated way to extract **all emails (including full conversation threads)** from Gmail for a specific email address using the **Gmail API**.
+This project provides an automated way to extract **all emails (including full conversation threads)** from Gmail for a specific email address or domain using the **Gmail API**.
 
 ---
 
 ## 🚀 Features
 
 * Fetch complete **email threads**, not just individual messages
-* Filter emails by a **specific email ID**
+* Filter emails by a **specific email address or domain**
 * Supports Gmail-style search queries (`from:`, `to:`, `cc:`, etc.)
 * Handles pagination (large inboxes)
 * Outputs structured data in **JSON format**
@@ -45,10 +45,16 @@ pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-
 
 ### 3. First Run (Authentication)
 
-Run the script:
+Run the script with either an email address or a domain:
 
 ```bash
 python export_gmail_threads.py --email person@example.com
+```
+
+or
+
+```bash
+python export_gmail_threads.py --domain @xyz.com
 ```
 
 * A browser window will open
@@ -70,7 +76,13 @@ A file called `token.json` will be created:
 python export_gmail_threads.py --email person@example.com
 ```
 
-This fetches all threads where the email appears in:
+Or, to fetch all threads involving a domain:
+
+```bash
+python export_gmail_threads.py --domain @xyz.com
+```
+
+This fetches all threads where the target appears in:
 
 * From
 * To
@@ -100,7 +112,7 @@ You can use Gmail search operators:
 ### Include Spam & Trash
 
 ```bash
-python export_gmail_threads.py --email person@example.com --include-spam-trash
+python export_gmail_threads.py --domain @xyz.com --include-spam-trash
 ```
 
 ---
